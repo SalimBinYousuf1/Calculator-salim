@@ -1,0 +1,37 @@
+<resources>
+    <string name="app_name">Salim</string>
+    <string name="clear">All Clear</string>
+    <string name="delete">Delete</string>
+    <string name="percent">Percent</string>
+    <string name="divide">Divide</string>
+    <string name="multiply">Multiply</string>
+    <string name="subtract">Subtract</string>
+    <string name="add">Add</string>
+    <string name="equals">Equals</string>
+    <string name="dot">Decimal point</string>
+    <string name="plus_minus">Toggle sign</string>
+    <string name="parentheses">Parentheses</string>
+    <string name="history_title">History</string>
+    <string name="clear_history">Clear history</string>
+    <string name="history_empty">No calculations yet</string>
+    <string name="history_empty_subtitle">Your recent calculations will appear here</string>
+    <string name="scientific_mode">Scientific</string>
+    <string name="standard_mode">Standard</string>
+    <string name="copy_result">Copy result</string>
+    <string name="share_result">Share calculation</string>
+    <string name="copied_to_clipboard">Copied to clipboard</string>
+    <string name="delete_entry">Delete entry</string>
+    <string name="deg">DEG</string>
+    <string name="rad">RAD</string>
+    <string name="inv">INV</string>
+    <string name="sin">sin</string>
+    <string name="cos">cos</string>
+    <string name="tan">tan</string>
+    <string name="ln">ln</string>
+    <string name="log">log</string>
+    <string name="sqrt">√</string>
+    <string name="power">x^y</string>
+    <string name="factorial">x!</string>
+    <string name="pi">π</string>
+    <string name="euler">e</string>
+</resources>

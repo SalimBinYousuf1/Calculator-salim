@@ -1,0 +1,6 @@
+{
+  "name": "Salim",
+  "description": "A premium, native Android calculator with continuous calculation paper-tape, customizable themes, and scientific engine.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
