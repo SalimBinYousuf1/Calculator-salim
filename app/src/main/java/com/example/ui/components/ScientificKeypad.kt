@@ -3,10 +3,12 @@ package com.example.ui.components
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.viewmodel.CalculatorUiState
@@ -21,6 +23,26 @@ fun ScientificKeypad(
     onFactorial: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    @Composable
+    fun RowScope.SciBtn(
+        text: String,
+        fontSize: TextUnit = 15.sp,
+        isActive: Boolean = false,
+        onClick: () -> Unit
+    ) {
+        CalculatorButton(
+            text = text,
+            type = ButtonType.SCIENTIFIC,
+            fontSize = fontSize,
+            testTag = "btn_sci_$text",
+            isActive = isActive,
+            hapticEnabled = uiState.hapticEnabled,
+            soundEnabled = uiState.soundEnabled,
+            modifier = Modifier.weight(1f),
+            onClick = onClick
+        )
+    }
+
     Column(
         modifier = modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(4.dp)
@@ -29,44 +51,34 @@ fun ScientificKeypad(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(48.dp),
+                .height(46.dp),
             horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-            CalculatorButton(
+            SciBtn(
                 text = if (uiState.isRadMode) "RAD" else "DEG",
-                type = ButtonType.SCIENTIFIC,
-                fontSize = 14.sp,
+                fontSize = 13.sp,
                 isActive = uiState.isRadMode,
-                modifier = Modifier.weight(1f),
                 onClick = onToggleRadMode
             )
-            CalculatorButton(
+            SciBtn(
                 text = "INV",
-                type = ButtonType.SCIENTIFIC,
-                fontSize = 14.sp,
+                fontSize = 13.sp,
                 isActive = uiState.isInvMode,
-                modifier = Modifier.weight(1f),
                 onClick = onToggleInverse
             )
-            CalculatorButton(
+            SciBtn(
                 text = if (uiState.isInvMode) "sin⁻¹" else "sin",
-                type = ButtonType.SCIENTIFIC,
-                fontSize = 15.sp,
-                modifier = Modifier.weight(1f),
+                fontSize = 14.sp,
                 onClick = { onFunction(if (uiState.isInvMode) "asin" else "sin") }
             )
-            CalculatorButton(
+            SciBtn(
                 text = if (uiState.isInvMode) "cos⁻¹" else "cos",
-                type = ButtonType.SCIENTIFIC,
-                fontSize = 15.sp,
-                modifier = Modifier.weight(1f),
+                fontSize = 14.sp,
                 onClick = { onFunction(if (uiState.isInvMode) "acos" else "cos") }
             )
-            CalculatorButton(
+            SciBtn(
                 text = if (uiState.isInvMode) "tan⁻¹" else "tan",
-                type = ButtonType.SCIENTIFIC,
-                fontSize = 15.sp,
-                modifier = Modifier.weight(1f),
+                fontSize = 14.sp,
                 onClick = { onFunction(if (uiState.isInvMode) "atan" else "tan") }
             )
         }
@@ -75,14 +87,12 @@ fun ScientificKeypad(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(48.dp),
+                .height(46.dp),
             horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-            CalculatorButton(
+            SciBtn(
                 text = if (uiState.isInvMode) "eˣ" else "ln",
-                type = ButtonType.SCIENTIFIC,
-                fontSize = 15.sp,
-                modifier = Modifier.weight(1f),
+                fontSize = 14.sp,
                 onClick = {
                     if (uiState.isInvMode) {
                         onConstant("e")
@@ -92,11 +102,9 @@ fun ScientificKeypad(
                     }
                 }
             )
-            CalculatorButton(
+            SciBtn(
                 text = if (uiState.isInvMode) "10ˣ" else "log",
-                type = ButtonType.SCIENTIFIC,
-                fontSize = 15.sp,
-                modifier = Modifier.weight(1f),
+                fontSize = 14.sp,
                 onClick = {
                     if (uiState.isInvMode) {
                         onConstant("10")
@@ -106,25 +114,19 @@ fun ScientificKeypad(
                     }
                 }
             )
-            CalculatorButton(
+            SciBtn(
                 text = "1/x",
-                type = ButtonType.SCIENTIFIC,
-                fontSize = 15.sp,
-                modifier = Modifier.weight(1f),
+                fontSize = 14.sp,
                 onClick = { onFunction("reciprocal") }
             )
-            CalculatorButton(
+            SciBtn(
                 text = "e",
-                type = ButtonType.SCIENTIFIC,
-                fontSize = 16.sp,
-                modifier = Modifier.weight(1f),
+                fontSize = 15.sp,
                 onClick = { onConstant("e") }
             )
-            CalculatorButton(
+            SciBtn(
                 text = "π",
-                type = ButtonType.SCIENTIFIC,
-                fontSize = 16.sp,
-                modifier = Modifier.weight(1f),
+                fontSize = 15.sp,
                 onClick = { onConstant("π") }
             )
         }
@@ -133,44 +135,14 @@ fun ScientificKeypad(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(48.dp),
+                .height(46.dp),
             horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-            CalculatorButton(
-                text = "x²",
-                type = ButtonType.SCIENTIFIC,
-                fontSize = 15.sp,
-                modifier = Modifier.weight(1f),
-                onClick = { onFunction("power2") }
-            )
-            CalculatorButton(
-                text = "xʸ",
-                type = ButtonType.SCIENTIFIC,
-                fontSize = 15.sp,
-                modifier = Modifier.weight(1f),
-                onClick = { onFunction("powerY") }
-            )
-            CalculatorButton(
-                text = "√",
-                type = ButtonType.SCIENTIFIC,
-                fontSize = 17.sp,
-                modifier = Modifier.weight(1f),
-                onClick = { onFunction("sqrt") }
-            )
-            CalculatorButton(
-                text = "∛",
-                type = ButtonType.SCIENTIFIC,
-                fontSize = 17.sp,
-                modifier = Modifier.weight(1f),
-                onClick = { onFunction("cbrt") }
-            )
-            CalculatorButton(
-                text = "x!",
-                type = ButtonType.SCIENTIFIC,
-                fontSize = 15.sp,
-                modifier = Modifier.weight(1f),
-                onClick = onFactorial
-            )
+            SciBtn("x²", fontSize = 14.sp) { onFunction("power2") }
+            SciBtn("xʸ", fontSize = 14.sp) { onFunction("powerY") }
+            SciBtn("√", fontSize = 16.sp) { onFunction("sqrt") }
+            SciBtn("∛", fontSize = 16.sp) { onFunction("cbrt") }
+            SciBtn("x!", fontSize = 14.sp, onClick = onFactorial)
         }
     }
 }

@@ -29,11 +29,20 @@ object CalculatorEngine {
     private const val EPSILON = 1e-12
 
     /**
-     * Evaluates a mathematical expression string.
-     * @param rawExpr The input expression (e.g. "12 + 5 × sin(30°)")
+     * Evaluates a mathematical expression string with full operator precedence,
+     * parentheses, functions, and standard OEM percentage handling.
+     *
+     * @param rawExpr The input expression (e.g. "50 + 10%", "10 × (5 + 3) ÷ 4")
      * @param isRadMode True for radians, false for degrees
+     * @param precision Decimal places (-1 for Auto)
+     * @param grouping "COMMA", "SPACE", or "NONE"
      */
-    fun evaluate(rawExpr: String, isRadMode: Boolean, precision: Int = -1, grouping: String = "COMMA"): EvalResult {
+    fun evaluate(
+        rawExpr: String,
+        isRadMode: Boolean,
+        precision: Int = -1,
+        grouping: String = "COMMA"
+    ): EvalResult {
         val sanitized = sanitize(rawExpr)
         if (sanitized.isBlank()) {
             return EvalResult.Error("Empty expression")
@@ -83,14 +92,15 @@ object CalculatorEngine {
             .replace(" ", "")
     }
 
-    private sealed class Token {
+    sealed class Token {
         data class Number(val value: Double) : Token()
         data class Operator(val symbol: Char, val precedence: Int, val isRightAssociative: Boolean = false) : Token()
         data class Function(val name: String) : Token()
         object OpenParen : Token()
         object CloseParen : Token()
-        object Factorial : Token() // Unary postfix
-        object Percent : Token()   // Unary postfix or binary
+        object Factorial : Token()
+        // Special Percentage Token holding context or resolved value
+        data class Percent(val rawValue: Double? = null) : Token()
     }
 
     private fun tokenize(expr: String): List<Token> {
@@ -103,13 +113,13 @@ object CalculatorEngine {
         while (i < len) {
             val c = expr[i]
 
-            // Check for Numbers & Constants
+            // Numbers & Unary Minus
             if (c.isDigit() || c == '.' || (c == '-' && isUnaryMinus(prevToken))) {
                 val start = i
                 if (c == '-') i++
                 while (i < len && (expr[i].isDigit() || expr[i] == '.' || expr[i] == 'E' || expr[i] == 'e')) {
                     if ((expr[i] == 'E' || expr[i] == 'e') && i + 1 < len && (expr[i + 1] == '+' || expr[i + 1] == '-')) {
-                        i++ // Skip sign in exponent
+                        i++ // Skip sign in exponent e.g. 1e-5
                     }
                     i++
                 }
@@ -120,7 +130,7 @@ object CalculatorEngine {
                     numStr.toDouble()
                 }
 
-                // Check implicit multiplication (e.g. 5(2) or 5π)
+                // Insert implicit multiplication if needed (e.g. 5(2) or 5π)
                 insertImplicitMultiplyIfNeeded(tokens, prevToken)
 
                 val token = Token.Number(num)
@@ -147,7 +157,7 @@ object CalculatorEngine {
                 continue
             }
 
-            // Functions: sin, cos, tan, asin, acos, atan, ln, log, sqrt, cbrt
+            // Functions
             val funcNames = listOf("asin", "acos", "atan", "sin", "cos", "tan", "sqrt", "cbrt", "log", "ln")
             val matchedFunc = funcNames.firstOrNull { expr.startsWith(it, i) }
             if (matchedFunc != null) {
@@ -174,16 +184,23 @@ object CalculatorEngine {
                 continue
             }
 
-            // Postfix operators: ! and %
+            // Factorial (!)
             if (c == '!') {
                 tokens.add(Token.Factorial)
                 prevToken = Token.Factorial
                 i++
                 continue
             }
+
+            // Percentage (%) - Standard OEM Smart Percentage Transformation
             if (c == '%') {
-                tokens.add(Token.Percent)
-                prevToken = Token.Percent
+                // If previous token was a number, we analyze the operator before it:
+                // If expression was A + B%, standard OEM calculator evaluates B% as (A * B / 100)
+                // If expression was A - B%, standard OEM calculator evaluates B% as (A * B / 100)
+                // If expression was A * B% or A / B%, B% is (B / 100)
+                // If standalone, B% is (B / 100)
+                handlePercentageToken(tokens)
+                prevToken = tokens.lastOrNull()
                 i++
                 continue
             }
@@ -233,6 +250,33 @@ object CalculatorEngine {
         }
 
         return tokens
+    }
+
+    private fun handlePercentageToken(tokens: MutableList<Token>) {
+        if (tokens.isEmpty()) throw IllegalArgumentException("Missing operand before %")
+        val last = tokens.removeAt(tokens.size - 1)
+
+        if (last is Token.Number) {
+            val b = last.value
+            // Check if there is an operator before B:
+            if (tokens.size >= 2) {
+                val op = tokens[tokens.size - 1]
+                val prev = tokens[tokens.size - 2]
+                if (op is Token.Operator && (op.symbol == '+' || op.symbol == '-') && prev is Token.Number) {
+                    // Standard OEM behavior: A + B% => A + (A * B / 100)
+                    val a = prev.value
+                    val percentValue = a * (b / 100.0)
+                    tokens.add(Token.Number(percentValue))
+                    return
+                }
+            }
+            // Default percentage: B / 100.0
+            tokens.add(Token.Number(b / 100.0))
+        } else {
+            // General postfix percent
+            tokens.add(last)
+            tokens.add(Token.Percent())
+        }
     }
 
     private fun isUnaryMinus(prevToken: Token?): Boolean {
@@ -352,7 +396,6 @@ object CalculatorEngine {
         return when (name) {
             "sin" -> {
                 val rad = if (isRadMode) arg else Math.toRadians(arg)
-                // Normalize near-zero values like sin(180 deg)
                 val s = sin(rad)
                 if (abs(s) < EPSILON) 0.0 else s
             }
@@ -439,13 +482,11 @@ object CalculatorEngine {
     private fun cleanFloatNoise(value: Double): Double {
         if (value.isInfinite() || value.isNaN()) return value
 
-        // If value is extremely close to an integer (e.g. 5.000000000000001 or 4.999999999999999)
         val roundLong = value.roundToLong()
         if (abs(value - roundLong) < 1e-11) {
             return roundLong.toDouble()
         }
 
-        // Try rounding to 11 significant digits to strip floating artifacts
         return try {
             val bd = BigDecimal(value, MathContext(12, RoundingMode.HALF_UP))
             bd.toDouble()
@@ -455,7 +496,7 @@ object CalculatorEngine {
     }
 
     /**
-     * Formats a number with commas for thousands and handles scientific notation.
+     * Formats a number with commas or spaces for thousands and handles scientific notation.
      */
     fun formatNumber(value: Double, precision: Int = -1, grouping: String = "COMMA"): String {
         if (value.isInfinite() || value.isNaN()) return value.toString()
@@ -481,7 +522,6 @@ object CalculatorEngine {
             val decimals = if (precision == 0) "" else "." + "#".repeat(precision)
             if (useGrouping) "#,##0$decimals" else "0$decimals"
         } else {
-            // Auto precision: if integer, show integer format
             val roundLong = value.roundToLong()
             if (abs(value - roundLong) < 1e-11) {
                 return if (useGrouping) {
@@ -498,9 +538,6 @@ object CalculatorEngine {
         return df.format(value)
     }
 
-    /**
-     * Formats user expression for human-readable display with proper spaces.
-     */
     fun formatExpressionForDisplay(expr: String): String {
         return expr
             .replace("*", " × ")
@@ -508,7 +545,6 @@ object CalculatorEngine {
             .replace("-", " − ")
             .replace("+", " + ")
             .replace("^", " ^ ")
-            // Clean consecutive spaces
             .replace(Regex("\\s+"), " ")
             .trim()
     }

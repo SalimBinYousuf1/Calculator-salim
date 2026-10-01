@@ -20,13 +20,13 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AttachMoney
 import androidx.compose.material.icons.filled.Calculate
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Science
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Straighten
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -48,14 +48,15 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.ui.components.CurrencyConverterSection
 import com.example.ui.components.DisplaySection
 import com.example.ui.components.HistorySheet
 import com.example.ui.components.KeypadSection
+import com.example.ui.components.MemoryBar
 import com.example.ui.components.ScientificKeypad
 import com.example.ui.components.SettingsSheet
+import com.example.ui.components.UnitConverterSection
 import com.example.viewmodel.AppMode
 import com.example.viewmodel.CalculatorUiState
 import com.example.viewmodel.CalculatorViewModel
@@ -78,12 +79,14 @@ fun CalculatorScreen(
         enabled = uiState.isSettingsVisible ||
                 uiState.isHistoryVisible ||
                 uiState.isCurrencyPickerOpen ||
+                uiState.isUnitPickerOpen ||
                 uiState.appMode != AppMode.STANDARD
     ) {
         when {
             uiState.isSettingsVisible -> viewModel.setSettingsVisible(false)
             uiState.isHistoryVisible -> viewModel.setHistoryVisible(false)
             uiState.isCurrencyPickerOpen -> viewModel.closeCurrencyPicker()
+            uiState.isUnitPickerOpen -> viewModel.closeUnitPicker()
             uiState.appMode != AppMode.STANDARD -> viewModel.setAppMode(AppMode.STANDARD)
         }
     }
@@ -111,6 +114,12 @@ fun CalculatorScreen(
             // Whole-screen Currency Exchange when currency mode is selected
             if (uiState.appMode == AppMode.CURRENCY) {
                 CurrencyConverterSection(
+                    uiState = uiState,
+                    viewModel = viewModel,
+                    onShowSnackbar = { scope.launch { snackbarHostState.showSnackbar(it) } }
+                )
+            } else if (uiState.appMode == AppMode.UNIT_CONVERTER) {
+                UnitConverterSection(
                     uiState = uiState,
                     viewModel = viewModel,
                     onShowSnackbar = { scope.launch { snackbarHostState.showSnackbar(it) } }
@@ -164,13 +173,14 @@ private fun PortraitCalculatorLayout(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 12.dp, vertical = 6.dp),
+            .padding(horizontal = 12.dp, vertical = 4.dp),
         verticalArrangement = Arrangement.SpaceBetween
     ) {
-        // Top Controls Bar with single '$' currency icon, clean history icon (no digit badge), fx, and settings
+        // Top Controls Bar with single '$' currency icon, unit converter, clean history icon, fx, and settings
         TopControlsRow(
             uiState = uiState,
             onToggleScientific = { viewModel.toggleScientific() },
+            onOpenUnitConverter = { viewModel.setAppMode(AppMode.UNIT_CONVERTER) },
             onOpenCurrency = { viewModel.setAppMode(AppMode.CURRENCY) },
             onToggleHistory = { viewModel.toggleHistory() },
             onOpenSettings = { viewModel.setSettingsVisible(true) }
@@ -183,6 +193,16 @@ private fun PortraitCalculatorLayout(
             modifier = Modifier.weight(1f)
         )
 
+        // Memory Functions Bar (MC, MR, M+, M-, MS)
+        MemoryBar(
+            uiState = uiState,
+            onMemoryClear = { viewModel.onMemoryClear() },
+            onMemoryRecall = { viewModel.onMemoryRecall() },
+            onMemoryAdd = { viewModel.onMemoryAdd() },
+            onMemorySubtract = { viewModel.onMemorySubtract() },
+            onMemoryStore = { viewModel.onMemoryStore() }
+        )
+
         // Scientific Keypad (if fx toggled)
         if (uiState.appMode == AppMode.SCIENTIFIC) {
             ScientificKeypad(
@@ -192,7 +212,7 @@ private fun PortraitCalculatorLayout(
                 onFunction = { viewModel.onFunction(it) },
                 onConstant = { viewModel.onConstant(it) },
                 onFactorial = { viewModel.onFactorial() },
-                modifier = Modifier.padding(bottom = 4.dp)
+                modifier = Modifier.padding(bottom = 2.dp)
             )
         }
 
@@ -207,7 +227,7 @@ private fun PortraitCalculatorLayout(
             onBackspace = { viewModel.onBackspace() },
             onAllClear = { viewModel.onAllClear() },
             onEquals = { viewModel.onEquals() },
-            rowHeight = if (uiState.appMode == AppMode.SCIENTIFIC) 56.dp else 68.dp
+            rowHeight = if (uiState.appMode == AppMode.SCIENTIFIC) 54.dp else 66.dp
         )
     }
 }
@@ -234,6 +254,7 @@ private fun LandscapeCalculatorLayout(
             TopControlsRow(
                 uiState = uiState,
                 onToggleScientific = { viewModel.toggleScientific() },
+                onOpenUnitConverter = { viewModel.setAppMode(AppMode.UNIT_CONVERTER) },
                 onOpenCurrency = { viewModel.setAppMode(AppMode.CURRENCY) },
                 onToggleHistory = { viewModel.toggleHistory() },
                 onOpenSettings = { viewModel.setSettingsVisible(true) }
@@ -245,6 +266,15 @@ private fun LandscapeCalculatorLayout(
                 modifier = Modifier.weight(1f)
             )
 
+            MemoryBar(
+                uiState = uiState,
+                onMemoryClear = { viewModel.onMemoryClear() },
+                onMemoryRecall = { viewModel.onMemoryRecall() },
+                onMemoryAdd = { viewModel.onMemoryAdd() },
+                onMemorySubtract = { viewModel.onMemorySubtract() },
+                onMemoryStore = { viewModel.onMemoryStore() }
+            )
+
             ScientificKeypad(
                 uiState = uiState,
                 onToggleRadMode = { viewModel.toggleRadMode() },
@@ -252,7 +282,7 @@ private fun LandscapeCalculatorLayout(
                 onFunction = { viewModel.onFunction(it) },
                 onConstant = { viewModel.onConstant(it) },
                 onFactorial = { viewModel.onFactorial() },
-                modifier = Modifier.padding(bottom = 4.dp)
+                modifier = Modifier.padding(bottom = 2.dp)
             )
         }
 
@@ -283,6 +313,7 @@ private fun LandscapeCalculatorLayout(
 private fun TopControlsRow(
     uiState: CalculatorUiState,
     onToggleScientific: () -> Unit,
+    onOpenUnitConverter: () -> Unit,
     onOpenCurrency: () -> Unit,
     onToggleHistory: () -> Unit,
     onOpenSettings: () -> Unit
@@ -319,10 +350,10 @@ private fun TopControlsRow(
             )
         }
 
-        // Controls: fx toggle, History (clean, no number badge), Single '$' exchange icon, Settings gear
+        // Controls: fx toggle, Unit Converter, Currency Exchange ($), History (clean), Settings
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp)
+            horizontalArrangement = Arrangement.spacedBy(2.dp)
         ) {
             // fx (Scientific Mode Toggle)
             IconButton(
@@ -344,7 +375,47 @@ private fun TopControlsRow(
                 )
             }
 
-            // History Button (Clean icon, NO number badge per user instruction!)
+            // Unit Converter Button
+            IconButton(
+                onClick = onOpenUnitConverter,
+                modifier = Modifier.testTag("btn_unit_converter"),
+                colors = if (uiState.appMode == AppMode.UNIT_CONVERTER) {
+                    IconButtonDefaults.filledIconButtonColors(
+                        containerColor = MaterialTheme.colorScheme.primaryContainer,
+                        contentColor = MaterialTheme.colorScheme.primary
+                    )
+                } else {
+                    IconButtonDefaults.iconButtonColors()
+                }
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Straighten,
+                    contentDescription = "Unit Converter",
+                    tint = if (uiState.appMode == AppMode.UNIT_CONVERTER) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            // Single '$' Exchange Rate Icon on main screen
+            IconButton(
+                onClick = onOpenCurrency,
+                modifier = Modifier.testTag("btn_currency_mode"),
+                colors = if (uiState.appMode == AppMode.CURRENCY) {
+                    IconButtonDefaults.filledIconButtonColors(
+                        containerColor = MaterialTheme.colorScheme.primaryContainer,
+                        contentColor = MaterialTheme.colorScheme.primary
+                    )
+                } else {
+                    IconButtonDefaults.iconButtonColors()
+                }
+            ) {
+                Icon(
+                    imageVector = Icons.Default.AttachMoney,
+                    contentDescription = "Currency Exchange",
+                    tint = if (uiState.appMode == AppMode.CURRENCY) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            // History Button (Clean icon, NO number badge)
             IconButton(
                 onClick = onToggleHistory,
                 modifier = Modifier.testTag("btn_history")
@@ -353,22 +424,6 @@ private fun TopControlsRow(
                     imageVector = Icons.Default.History,
                     contentDescription = "History",
                     tint = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-
-            // Single '$' Exchange Rate Icon on main screen per user instruction!
-            IconButton(
-                onClick = onOpenCurrency,
-                modifier = Modifier.testTag("btn_currency_mode"),
-                colors = IconButtonDefaults.filledIconButtonColors(
-                    containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f),
-                    contentColor = MaterialTheme.colorScheme.primary
-                )
-            ) {
-                Icon(
-                    imageVector = Icons.Default.AttachMoney,
-                    contentDescription = "Currency Exchange",
-                    tint = MaterialTheme.colorScheme.primary
                 )
             }
 

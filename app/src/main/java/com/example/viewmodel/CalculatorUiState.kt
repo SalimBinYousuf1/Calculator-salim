@@ -2,12 +2,14 @@ package com.example.viewmodel
 
 import com.example.model.CalculationItem
 import com.example.model.CurrencyInfoEntity
+import com.example.model.UnitCategory
 import java.util.UUID
 
 enum class AppMode {
     STANDARD,
     SCIENTIFIC,
-    CURRENCY
+    CURRENCY,
+    UNIT_CONVERTER
 }
 
 data class CalculationStep(
@@ -36,6 +38,14 @@ data class CalculatorUiState(
     val showClearHistoryDialog: Boolean = false,
     val snackbarMessage: String? = null,
 
+    // Memory Functions (MC, MR, M+, M-, MS)
+    val memoryValue: Double = 0.0,
+    val isMemorySet: Boolean = false,
+
+    // Repeated Equals State (OEM Feature)
+    val lastBinaryOp: Char? = null,
+    val lastBinaryOperand: Double? = null,
+
     // Currency Exchange State (All Countries & Currencies)
     val currencyAmount: String = "100",
     val fromCurrency: String = "USD",
@@ -51,11 +61,20 @@ data class CalculatorUiState(
     val currencyList: List<CurrencyInfoEntity> = emptyList(),
     val currencyErrorMessage: String? = null,
 
+    // Unit Converter State
+    val unitCategory: UnitCategory = UnitCategory.LENGTH,
+    val unitFromId: String = "m",
+    val unitToId: String = "ft",
+    val unitInputAmount: String = "1",
+    val unitConvertedResult: String = "3.28084",
+    val isUnitPickerOpen: Boolean = false,
+    val isPickingFromUnit: Boolean = true,
+
     // Customization & Settings (Defaults: LIGHT theme, EMERALD green accent)
-    val themeMode: String = "LIGHT", // Default Light per user request!
-    val accentColor: String = "EMERALD", // Default Green per user request!
+    val themeMode: String = "LIGHT",
+    val accentColor: String = "EMERALD",
     val hapticEnabled: Boolean = true,
-    val soundEnabled: Boolean = false, // Keypad touch sound on/off per user request!
+    val soundEnabled: Boolean = false,
     val decimalPrecision: Int = -1, // -1 for Auto, or 2, 4, 6, 8
     val thousandsGrouping: String = "COMMA" // COMMA, SPACE, NONE
 )

@@ -53,4 +53,6 @@ object FrankfurterClient {
             .build()
             .create(FrankfurterApiService::class.java)
     }
+
+    val api: FrankfurterApiService get() = apiService
 }

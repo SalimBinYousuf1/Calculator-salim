@@ -51,6 +51,7 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -74,17 +75,17 @@ fun DisplaySection(
     var showContextMenu by remember { mutableStateOf(false) }
 
     // Auto scroll active expression to end
-    LaunchedEffect(uiState.expression) {
+    LaunchedEffect(uiState.expression, exprScrollState.maxValue) {
         if (uiState.expression.isNotEmpty()) {
-            exprScrollState.animateScrollTo(exprScrollState.maxValue)
+            exprScrollState.scrollTo(exprScrollState.maxValue)
         }
     }
 
     // Auto scroll result to end when long digits appear
     val heroText = uiState.finalResult ?: uiState.livePreview
-    LaunchedEffect(heroText) {
+    LaunchedEffect(heroText, resultScrollState.maxValue) {
         if (heroText != null) {
-            resultScrollState.animateScrollTo(resultScrollState.maxValue)
+            resultScrollState.scrollTo(resultScrollState.maxValue)
         }
     }
 
@@ -143,22 +144,38 @@ fun DisplaySection(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                if (uiState.appMode == AppMode.SCIENTIFIC) {
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
-                        modifier = Modifier.padding(bottom = 2.dp)
-                    ) {
-                        Text(
-                            text = if (uiState.isRadMode) "RAD" else "DEG",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
-                        )
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    if (uiState.appMode == AppMode.SCIENTIFIC) {
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
+                            modifier = Modifier.padding(bottom = 2.dp)
+                        ) {
+                            Text(
+                                text = if (uiState.isRadMode) "RAD" else "DEG",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                            )
+                        }
                     }
-                } else {
-                    Spacer(modifier = Modifier.width(1.dp))
+                    if (uiState.isMemorySet) {
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                            modifier = Modifier.padding(bottom = 2.dp)
+                        ) {
+                            Text(
+                                text = "M",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
                 }
+                Spacer(modifier = Modifier.width(1.dp))
             }
 
             // Scrollable continuous calculation paper tape
@@ -208,23 +225,28 @@ fun DisplaySection(
             val isFinalState = uiState.isCalculated && uiState.finalResult != null
 
             Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(exprScrollState),
+                modifier = Modifier.fillMaxWidth(),
                 contentAlignment = Alignment.CenterEnd
             ) {
-                Text(
-                    text = expressionText,
-                    color = if (isFinalState) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
-                    fontSize = if (isFinalState) 24.sp else getDynamicExpressionSize(expressionText.length),
-                    fontWeight = FontWeight.Normal,
-                    fontFamily = FontFamily.SansSerif,
-                    textAlign = TextAlign.End,
-                    softWrap = false,
-                    maxLines = 1,
-                    letterSpacing = 0.5.sp,
-                    modifier = Modifier.testTag("text_expression")
-                )
+                Row(
+                    modifier = Modifier.horizontalScroll(exprScrollState),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    Text(
+                        text = expressionText,
+                        color = if (isFinalState) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
+                        fontSize = if (isFinalState) 22.sp else getDynamicExpressionSize(expressionText.length),
+                        fontWeight = FontWeight.Normal,
+                        fontFamily = FontFamily.SansSerif,
+                        style = TextStyle(
+                            fontFeatureSettings = "tnum",
+                            letterSpacing = 0.sp
+                        ),
+                        softWrap = false,
+                        maxLines = 1,
+                        modifier = Modifier.testTag("text_expression")
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.height(4.dp))
@@ -265,29 +287,34 @@ fun DisplaySection(
                             Spacer(modifier = Modifier.width(8.dp))
                         }
 
-                        // Big, Bold result without '=' prefix, in horizontally scrollable box to prevent jumbling
+                        // Big, Bold result without '=' prefix, in horizontally scrollable container with tabular numbers
                         Box(
-                            modifier = Modifier
-                                .weight(1f, fill = false)
-                                .horizontalScroll(resultScrollState),
+                            modifier = Modifier.weight(1f, fill = false),
                             contentAlignment = Alignment.CenterEnd
                         ) {
-                            Text(
-                                text = heroText, // No '=' prefix!
-                                color = when {
-                                    isError -> MaterialTheme.colorScheme.error
-                                    isFinalState -> MaterialTheme.colorScheme.onSurface
-                                    else -> MaterialTheme.colorScheme.primary
-                                },
-                                fontSize = getDynamicResultSize(heroText.length),
-                                fontWeight = FontWeight.Bold,
-                                fontFamily = FontFamily.SansSerif,
-                                textAlign = TextAlign.End,
-                                softWrap = false,
-                                maxLines = 1,
-                                letterSpacing = 0.5.sp,
-                                modifier = Modifier.testTag("text_result")
-                            )
+                            Row(
+                                modifier = Modifier.horizontalScroll(resultScrollState),
+                                horizontalArrangement = Arrangement.End
+                            ) {
+                                Text(
+                                    text = heroText, // No '=' prefix!
+                                    color = when {
+                                        isError -> MaterialTheme.colorScheme.error
+                                        isFinalState -> MaterialTheme.colorScheme.onSurface
+                                        else -> MaterialTheme.colorScheme.primary
+                                    },
+                                    fontSize = getDynamicResultSize(heroText.length),
+                                    fontWeight = FontWeight.Bold,
+                                    fontFamily = FontFamily.SansSerif,
+                                    style = TextStyle(
+                                        fontFeatureSettings = "tnum",
+                                        letterSpacing = 0.sp
+                                    ),
+                                    softWrap = false,
+                                    maxLines = 1,
+                                    modifier = Modifier.testTag("text_result")
+                                )
+                            }
                         }
                     }
                 }
@@ -334,8 +361,9 @@ fun DisplaySection(
 
 private fun getDynamicExpressionSize(length: Int): androidx.compose.ui.unit.TextUnit {
     return when {
-        length > 30 -> 20.sp
-        length > 20 -> 24.sp
+        length > 40 -> 16.sp
+        length > 28 -> 19.sp
+        length > 20 -> 23.sp
         length > 14 -> 28.sp
         length > 8 -> 34.sp
         else -> 40.sp
@@ -344,11 +372,12 @@ private fun getDynamicExpressionSize(length: Int): androidx.compose.ui.unit.Text
 
 private fun getDynamicResultSize(length: Int): androidx.compose.ui.unit.TextUnit {
     return when {
-        length > 25 -> 22.sp
-        length > 18 -> 26.sp
-        length > 14 -> 32.sp
-        length > 10 -> 38.sp
-        length > 7 -> 44.sp
+        length > 30 -> 18.sp
+        length > 22 -> 22.sp
+        length > 16 -> 28.sp
+        length > 12 -> 34.sp
+        length > 8 -> 40.sp
+        length > 5 -> 46.sp
         else -> 52.sp
     }
 }

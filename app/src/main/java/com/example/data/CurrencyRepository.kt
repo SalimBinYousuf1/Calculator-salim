@@ -35,14 +35,12 @@ class CurrencyRepository(
     private val currencyDao: CurrencyDao,
     private val context: Context? = null
 ) {
-
     val allCurrencies: Flow<List<CurrencyInfoEntity>> = currencyDao.getAllCurrencies()
 
     suspend fun initializeIfNeeded() = withContext(Dispatchers.IO) {
-        if (currencyDao.getCurrenciesCount() < 50) {
+        val count = currencyDao.getCurrenciesCount()
+        if (count < 100) {
             seedDefaultCurrencies()
-        }
-        if (currencyDao.getRatesCount() < 50) {
             seedInitialRates()
         }
     }
@@ -107,7 +105,8 @@ class CurrencyRepository(
         }
 
         if (effectiveRate == null || effectiveRate <= 0.0) {
-            return@withContext ConversionResult.Error("No saved rate available for $from → $to. Connect to the internet once to update.")
+            // Fallback gracefully without app crash
+            return@withContext ConversionResult.Error("No rate available for $from → $to")
         }
 
         val converted = try {
@@ -131,61 +130,59 @@ class CurrencyRepository(
 
     suspend fun syncRates(force: Boolean = false): Boolean = withContext(Dispatchers.IO) {
         try {
-            // If offline, gracefully keep existing Room data without any error
             if (!isOnline()) {
                 return@withContext false
             }
 
             val syncMeta = currencyDao.getMetadata(KEY_LAST_SYNC)
             val now = System.currentTimeMillis()
-            val ONE_DAY_MS = 24 * 60 * 60 * 1000L
+            val oneDayMillis = 24 * 60 * 60 * 1000L
 
-            if (!force && syncMeta != null && (now - syncMeta.timestamp) < ONE_DAY_MS) {
-                return@withContext true // Already fresh within 24 hours
+            if (!force && syncMeta != null) {
+                val lastSyncTime = syncMeta.timestamp
+                if (now - lastSyncTime < oneDayMillis) {
+                    return@withContext true
+                }
             }
 
-            // Fetch currencies from Frankfurter
+            val response = FrankfurterClient.api.getLatestRates("EUR")
+            val base = response.base ?: "EUR"
+            val date = response.date ?: ""
+            val rates = response.rates
+
+            val rateEntities = mutableListOf<CurrencyRateEntity>()
+            rateEntities.add(CurrencyRateEntity(base, base, 1.0, date))
+
+            for ((quote, rate) in rates) {
+                rateEntities.add(CurrencyRateEntity(base, quote, rate, date))
+            }
+
+            currencyDao.insertRates(rateEntities)
+
+            // Try to sync currency names if available
             try {
-                val currenciesMap = FrankfurterClient.apiService.getCurrencies()
-                val currencyEntities = currenciesMap.map { (code, name) ->
+                val currenciesMap = FrankfurterClient.api.getCurrencies()
+                val updatedCurrencies = currenciesMap.map { (code, name) ->
+                    val country = getCountryNameForCode(code)
+                    val fullDisplayName = if (country.isNotBlank() && country != code) {
+                        "$country • $name"
+                    } else {
+                        name
+                    }
                     CurrencyInfoEntity(
                         code = code,
-                        name = "${getCountryNameForCode(code)} • $name",
+                        name = fullDisplayName,
                         symbol = getCurrencySymbol(code),
                         flag = getCountryFlag(code)
                     )
                 }
-                if (currencyEntities.isNotEmpty()) {
-                    currencyDao.insertCurrencies(currencyEntities)
+                if (updatedCurrencies.isNotEmpty()) {
+                    currencyDao.insertCurrencies(updatedCurrencies)
                 }
-            } catch (_: Exception) {}
-
-            // Fetch rates against EUR
-            val ratesResponse = FrankfurterClient.apiService.getLatestRates(base = "EUR")
-            val date = ratesResponse.date ?: "Today"
-            val rateEntities = mutableListOf<CurrencyRateEntity>()
-
-            rateEntities.add(
-                CurrencyRateEntity(
-                    baseCurrency = "EUR",
-                    quoteCurrency = "EUR",
-                    rate = 1.0,
-                    rateDate = date
-                )
-            )
-
-            for ((quote, rateVal) in ratesResponse.rates) {
-                rateEntities.add(
-                    CurrencyRateEntity(
-                        baseCurrency = "EUR",
-                        quoteCurrency = quote,
-                        rate = rateVal,
-                        rateDate = date
-                    )
-                )
+            } catch (_: Exception) {
+                // Non-fatal if currencies endpoint is unreachable
             }
 
-            currencyDao.insertRates(rateEntities)
             currencyDao.insertMetadata(
                 SyncMetadataEntity(
                     key = KEY_LAST_SYNC,
@@ -193,9 +190,10 @@ class CurrencyRepository(
                     timestamp = now
                 )
             )
+
             true
-        } catch (e: Exception) {
-            // Always keep existing Room rates intact on any network error
+        } catch (_: Exception) {
+            // Graceful fallback: Network error doesn't break the app; offline cache continues
             false
         }
     }
@@ -233,7 +231,7 @@ class CurrencyRepository(
             CurrencyInfoEntity("BDT", "Bangladesh • Bangladeshi Taka", "৳", "🇧🇩"),
             CurrencyInfoEntity("EGP", "Egypt • Egyptian Pound", "E£", "🇪🇬"),
             CurrencyInfoEntity("NGN", "Nigeria • Nigerian Naira", "₦", "🇳🇬"),
-            CurrencyInfoEntity("KES", "Kenya • Kenyan Shilling", "KSh", "🇰🇪"),
+            CurrencyInfoEntity("KES", "Kenya • Kenyan Shilling", "Sh", "🇰🇪"),
             CurrencyInfoEntity("NZD", "New Zealand • New Zealand Dollar", "NZ$", "🇳🇿"),
             CurrencyInfoEntity("SEK", "Sweden • Swedish Krona", "kr", "🇸🇪"),
             CurrencyInfoEntity("NOK", "Norway • Norwegian Krone", "kr", "🇳🇴"),
@@ -262,7 +260,93 @@ class CurrencyRepository(
             CurrencyInfoEntity("ISK", "Iceland • Icelandic Krona", "kr", "🇮🇸"),
             CurrencyInfoEntity("UAH", "Ukraine • Ukrainian Hryvnia", "₴", "🇺🇦"),
             CurrencyInfoEntity("JOD", "Jordan • Jordanian Dinar", "JD", "🇯🇴"),
-            CurrencyInfoEntity("IQD", "Iraq • Iraqi Dinar", "IQD", "🇮🇶")
+            CurrencyInfoEntity("IQD", "Iraq • Iraqi Dinar", "IQD", "🇮🇶"),
+            CurrencyInfoEntity("AFN", "Afghanistan • Afghan Afghani", "؋", "🇦🇫"),
+            CurrencyInfoEntity("ALL", "Albania • Albanian Lek", "L", "🇦🇱"),
+            CurrencyInfoEntity("AMD", "Armenia • Armenian Dram", "֏", "🇦🇲"),
+            CurrencyInfoEntity("AOA", "Angola • Angolan Kwanza", "Kz", "🇦🇴"),
+            CurrencyInfoEntity("AZN", "Azerbaijan • Azerbaijani Manat", "₼", "🇦🇿"),
+            CurrencyInfoEntity("BAM", "Bosnia & Herzegovina • Convertible Mark", "KM", "🇧🇦"),
+            CurrencyInfoEntity("BBD", "Barbados • Barbadian Dollar", "$", "🇧🇧"),
+            CurrencyInfoEntity("BIF", "Burundi • Burundian Franc", "Fr", "🇧🇮"),
+            CurrencyInfoEntity("BND", "Brunei • Brunei Dollar", "$", "🇧🇳"),
+            CurrencyInfoEntity("BOB", "Bolivia • Bolivian Boliviano", "Bs.", "🇧🇴"),
+            CurrencyInfoEntity("BSD", "Bahamas • Bahamian Dollar", "$", "🇧🇸"),
+            CurrencyInfoEntity("BTN", "Bhutan • Bhutanese Ngultrum", "Nu.", "🇧🇹"),
+            CurrencyInfoEntity("BWP", "Botswana • Botswana Pula", "P", "🇧🇼"),
+            CurrencyInfoEntity("BYN", "Belarus • Belarusian Ruble", "Br", "🇧🇾"),
+            CurrencyInfoEntity("BZD", "Belize • Belize Dollar", "$", "🇧🇿"),
+            CurrencyInfoEntity("CDF", "DR Congo • Congolese Franc", "Fr", "🇨🇩"),
+            CurrencyInfoEntity("CRC", "Costa Rica • Costa Rican Colón", "₡", "🇨🇷"),
+            CurrencyInfoEntity("CUP", "Cuba • Cuban Peso", "₱", "🇨🇺"),
+            CurrencyInfoEntity("CVE", "Cape Verde • Cape Verdean Escudo", "$", "🇨🇻"),
+            CurrencyInfoEntity("DJF", "Djibouti • Djiboutian Franc", "Fr", "🇩🇯"),
+            CurrencyInfoEntity("DOP", "Dominican Republic • Dominican Peso", "RD$", "🇩🇴"),
+            CurrencyInfoEntity("ERN", "Eritrea • Eritrean Nakfa", "Nfk", "🇪🇷"),
+            CurrencyInfoEntity("ETB", "Ethiopia • Ethiopian Birr", "Br", "🇪🇹"),
+            CurrencyInfoEntity("FJD", "Fiji • Fijian Dollar", "$", "🇫🇯"),
+            CurrencyInfoEntity("GEL", "Georgia • Georgian Lari", "₾", "🇬🇪"),
+            CurrencyInfoEntity("GMD", "Gambia • Gambian Dalasi", "D", "🇬🇲"),
+            CurrencyInfoEntity("GNF", "Guinea • Guinean Franc", "Fr", "🇬🇳"),
+            CurrencyInfoEntity("GTQ", "Guatemala • Guatemalan Quetzal", "Q", "🇬🇹"),
+            CurrencyInfoEntity("GYD", "Guyana • Guyanese Dollar", "$", "🇬🇾"),
+            CurrencyInfoEntity("HNL", "Honduras • Honduran Lempira", "L", "🇭🇳"),
+            CurrencyInfoEntity("HTG", "Haiti • Haitian Gourde", "G", "🇭🇹"),
+            CurrencyInfoEntity("JMD", "Jamaica • Jamaican Dollar", "$", "🇯🇲"),
+            CurrencyInfoEntity("KGS", "Kyrgyzstan • Kyrgyzstani Som", "с", "🇰🇬"),
+            CurrencyInfoEntity("KHR", "Cambodia • Cambodian Riel", "៛", "🇰🇭"),
+            CurrencyInfoEntity("KMF", "Comoros • Comorian Franc", "Fr", "🇰🇲"),
+            CurrencyInfoEntity("KZT", "Kazakhstan • Kazakhstani Tenge", "₸", "🇰🇿"),
+            CurrencyInfoEntity("LAK", "Laos • Lao Kip", "₭", "🇱🇦"),
+            CurrencyInfoEntity("LBP", "Lebanon • Lebanese Pound", "LL", "🇱🇧"),
+            CurrencyInfoEntity("LRD", "Liberia • Liberian Dollar", "L$", "🇱🇷"),
+            CurrencyInfoEntity("LSL", "Lesotho • Lesotho Loti", "L", "🇱🇸"),
+            CurrencyInfoEntity("LYD", "Libya • Libyan Dinar", "LD", "🇱🇾"),
+            CurrencyInfoEntity("MDL", "Moldova • Moldovan Leu", "L", "🇲🇩"),
+            CurrencyInfoEntity("MGA", "Madagascar • Malagasy Ariary", "Ar", "🇲🇬"),
+            CurrencyInfoEntity("MKD", "North Macedonia • Macedonian Denar", "ден", "🇲🇰"),
+            CurrencyInfoEntity("MMK", "Myanmar • Myanmar Kyat", "K", "🇲🇲"),
+            CurrencyInfoEntity("MNT", "Mongolia • Mongolian Tögrög", "₮", "🇲🇳"),
+            CurrencyInfoEntity("MOP", "Macau • Macanese Pataca", "MOP$", "🇲🇴"),
+            CurrencyInfoEntity("MRU", "Mauritania • Mauritanian Ouguiya", "UM", "🇲🇷"),
+            CurrencyInfoEntity("MUR", "Mauritius • Mauritian Rupee", "Rs", "🇲🇺"),
+            CurrencyInfoEntity("MVR", "Maldives • Maldivian Rufiyaa", "Rf", "🇲🇻"),
+            CurrencyInfoEntity("MWK", "Malawi • Malawian Kwacha", "MK", "🇲🇼"),
+            CurrencyInfoEntity("MZN", "Mozambique • Mozambican Metical", "MT", "🇲🇿"),
+            CurrencyInfoEntity("NAD", "Namibia • Namibian Dollar", "$", "🇳🇦"),
+            CurrencyInfoEntity("NIO", "Nicaragua • Nicaraguan Córdoba", "C$", "🇳🇮"),
+            CurrencyInfoEntity("PAB", "Panama • Panamanian Balboa", "B/.", "🇵🇦"),
+            CurrencyInfoEntity("PGK", "Papua New Guinea • Papua New Guinean Kina", "K", "🇵🇬"),
+            CurrencyInfoEntity("PYG", "Paraguay • Paraguayan Guaraní", "₲", "🇵🇾"),
+            CurrencyInfoEntity("RSD", "Serbia • Serbian Dinar", "дин", "🇷🇸"),
+            CurrencyInfoEntity("RWF", "Rwanda • Rwandan Franc", "Fr", "🇷🇼"),
+            CurrencyInfoEntity("SCR", "Seychelles • Seychellois Rupee", "Rs", "🇸🇨"),
+            CurrencyInfoEntity("SDG", "Sudan • Sudanese Pound", "£", "🇸🇩"),
+            CurrencyInfoEntity("SLE", "Sierra Leone • Sierra Leonean Leone", "Le", "🇸🇱"),
+            CurrencyInfoEntity("SOS", "Somalia • Somali Shilling", "Sh", "🇸🇴"),
+            CurrencyInfoEntity("SRD", "Suriname • Surinamese Dollar", "$", "🇸🇷"),
+            CurrencyInfoEntity("SSP", "South Sudan • South Sudanese Pound", "£", "🇸🇸"),
+            CurrencyInfoEntity("STN", "São Tomé & Príncipe • Dobra", "Db", "🇸🇹"),
+            CurrencyInfoEntity("SYP", "Syria • Syrian Pound", "£S", "🇸🇾"),
+            CurrencyInfoEntity("SZL", "Eswatini • Swazi Lilangeni", "E", "🇸🇿"),
+            CurrencyInfoEntity("TJS", "Tajikistan • Tajikistani Somoni", "SM", "🇹🇯"),
+            CurrencyInfoEntity("TMT", "Turkmenistan • Turkmenistani Manat", "T", "🇹🇲"),
+            CurrencyInfoEntity("TND", "Tunisia • Tunisian Dinar", "DT", "🇹🇳"),
+            CurrencyInfoEntity("TOP", "Tonga • Tongan Paʻanga", "T$", "🇹🇴"),
+            CurrencyInfoEntity("TTD", "Trinidad & Tobago • Trinidad & Tobago Dollar", "$", "🇹🇹"),
+            CurrencyInfoEntity("TZS", "Tanzania • Tanzanian Shilling", "Sh", "🇹🇿"),
+            CurrencyInfoEntity("UGX", "Uganda • Ugandan Shilling", "Sh", "🇺🇬"),
+            CurrencyInfoEntity("UYU", "Uruguay • Uruguayan Peso", "\$U", "🇺🇾"),
+            CurrencyInfoEntity("UZS", "Uzbekistan • Uzbekistani Som", "so'm", "🇺🇿"),
+            CurrencyInfoEntity("VES", "Venezuela • Venezuelan Bolívar", "Bs.", "🇻🇪"),
+            CurrencyInfoEntity("VUV", "Vanuatu • Vanuatu Vatu", "VT", "🇻🇺"),
+            CurrencyInfoEntity("WST", "Samoa • Samoan Tālā", "WS$", "🇼🇸"),
+            CurrencyInfoEntity("XAF", "Central Africa • Central African CFA Franc", "FCFA", "🇨🇲"),
+            CurrencyInfoEntity("XOF", "West Africa • West African CFA Franc", "CFA", "🇸🇳"),
+            CurrencyInfoEntity("XPF", "French Polynesia • CFP Franc", "₣", "🇵🇫"),
+            CurrencyInfoEntity("YER", "Yemen • Yemeni Rial", "﷼", "🇾🇪"),
+            CurrencyInfoEntity("ZMW", "Zambia • Zambian Kwacha", "K", "🇿🇲"),
+            CurrencyInfoEntity("ZWL", "Zimbabwe • Zimbabwean Dollar", "Z$", "🇿🇼")
         )
         currencyDao.insertCurrencies(list)
     }
@@ -326,7 +410,93 @@ class CurrencyRepository(
             CurrencyRateEntity("EUR", "ISK", 148.0, date),
             CurrencyRateEntity("EUR", "UAH", 44.50, date),
             CurrencyRateEntity("EUR", "JOD", 0.769, date),
-            CurrencyRateEntity("EUR", "IQD", 1420.0, date)
+            CurrencyRateEntity("EUR", "IQD", 1420.0, date),
+            CurrencyRateEntity("EUR", "AFN", 74.0, date),
+            CurrencyRateEntity("EUR", "ALL", 100.5, date),
+            CurrencyRateEntity("EUR", "AMD", 420.0, date),
+            CurrencyRateEntity("EUR", "AOA", 1005.0, date),
+            CurrencyRateEntity("EUR", "AZN", 1.84, date),
+            CurrencyRateEntity("EUR", "BAM", 1.956, date),
+            CurrencyRateEntity("EUR", "BBD", 2.17, date),
+            CurrencyRateEntity("EUR", "BIF", 3150.0, date),
+            CurrencyRateEntity("EUR", "BND", 1.42, date),
+            CurrencyRateEntity("EUR", "BOB", 7.50, date),
+            CurrencyRateEntity("EUR", "BSD", 1.085, date),
+            CurrencyRateEntity("EUR", "BTN", 90.50, date),
+            CurrencyRateEntity("EUR", "BWP", 14.60, date),
+            CurrencyRateEntity("EUR", "BYN", 3.55, date),
+            CurrencyRateEntity("EUR", "BZD", 2.18, date),
+            CurrencyRateEntity("EUR", "CDF", 3100.0, date),
+            CurrencyRateEntity("EUR", "CRC", 560.0, date),
+            CurrencyRateEntity("EUR", "CUP", 26.0, date),
+            CurrencyRateEntity("EUR", "CVE", 110.25, date),
+            CurrencyRateEntity("EUR", "DJF", 193.0, date),
+            CurrencyRateEntity("EUR", "DOP", 64.5, date),
+            CurrencyRateEntity("EUR", "ERN", 16.25, date),
+            CurrencyRateEntity("EUR", "ETB", 130.0, date),
+            CurrencyRateEntity("EUR", "FJD", 2.45, date),
+            CurrencyRateEntity("EUR", "GEL", 2.95, date),
+            CurrencyRateEntity("EUR", "GMD", 76.0, date),
+            CurrencyRateEntity("EUR", "GNF", 9350.0, date),
+            CurrencyRateEntity("EUR", "GTQ", 8.40, date),
+            CurrencyRateEntity("EUR", "GYD", 227.0, date),
+            CurrencyRateEntity("EUR", "HNL", 27.0, date),
+            CurrencyRateEntity("EUR", "HTG", 143.0, date),
+            CurrencyRateEntity("EUR", "JMD", 170.0, date),
+            CurrencyRateEntity("EUR", "KGS", 94.0, date),
+            CurrencyRateEntity("EUR", "KHR", 4420.0, date),
+            CurrencyRateEntity("EUR", "KMF", 492.0, date),
+            CurrencyRateEntity("EUR", "KZT", 520.0, date),
+            CurrencyRateEntity("EUR", "LAK", 23900.0, date),
+            CurrencyRateEntity("EUR", "LBP", 97000.0, date),
+            CurrencyRateEntity("EUR", "LRD", 212.0, date),
+            CurrencyRateEntity("EUR", "LSL", 19.10, date),
+            CurrencyRateEntity("EUR", "LYD", 5.25, date),
+            CurrencyRateEntity("EUR", "MDL", 19.30, date),
+            CurrencyRateEntity("EUR", "MGA", 4950.0, date),
+            CurrencyRateEntity("EUR", "MKD", 61.50, date),
+            CurrencyRateEntity("EUR", "MMK", 2280.0, date),
+            CurrencyRateEntity("EUR", "MNT", 3700.0, date),
+            CurrencyRateEntity("EUR", "MOP", 8.70, date),
+            CurrencyRateEntity("EUR", "MRU", 43.0, date),
+            CurrencyRateEntity("EUR", "MUR", 50.50, date),
+            CurrencyRateEntity("EUR", "MVR", 16.70, date),
+            CurrencyRateEntity("EUR", "MWK", 1880.0, date),
+            CurrencyRateEntity("EUR", "MZN", 69.30, date),
+            CurrencyRateEntity("EUR", "NAD", 19.10, date),
+            CurrencyRateEntity("EUR", "NIO", 40.0, date),
+            CurrencyRateEntity("EUR", "PAB", 1.085, date),
+            CurrencyRateEntity("EUR", "PGK", 4.30, date),
+            CurrencyRateEntity("EUR", "PYG", 8400.0, date),
+            CurrencyRateEntity("EUR", "RSD", 117.20, date),
+            CurrencyRateEntity("EUR", "RWF", 1480.0, date),
+            CurrencyRateEntity("EUR", "SCR", 15.20, date),
+            CurrencyRateEntity("EUR", "SDG", 650.0, date),
+            CurrencyRateEntity("EUR", "SLE", 24.50, date),
+            CurrencyRateEntity("EUR", "SOS", 620.0, date),
+            CurrencyRateEntity("EUR", "SRD", 38.0, date),
+            CurrencyRateEntity("EUR", "SSP", 1400.0, date),
+            CurrencyRateEntity("EUR", "STN", 24.50, date),
+            CurrencyRateEntity("EUR", "SYP", 14100.0, date),
+            CurrencyRateEntity("EUR", "SZL", 19.10, date),
+            CurrencyRateEntity("EUR", "TJS", 11.60, date),
+            CurrencyRateEntity("EUR", "TMT", 3.80, date),
+            CurrencyRateEntity("EUR", "TND", 3.35, date),
+            CurrencyRateEntity("EUR", "TOP", 2.55, date),
+            CurrencyRateEntity("EUR", "TTD", 7.35, date),
+            CurrencyRateEntity("EUR", "TZS", 2950.0, date),
+            CurrencyRateEntity("EUR", "UGX", 4020.0, date),
+            CurrencyRateEntity("EUR", "UYU", 44.50, date),
+            CurrencyRateEntity("EUR", "UZS", 13800.0, date),
+            CurrencyRateEntity("EUR", "VES", 40.0, date),
+            CurrencyRateEntity("EUR", "VUV", 130.0, date),
+            CurrencyRateEntity("EUR", "WST", 2.95, date),
+            CurrencyRateEntity("EUR", "XAF", 655.957, date),
+            CurrencyRateEntity("EUR", "XOF", 655.957, date),
+            CurrencyRateEntity("EUR", "XPF", 119.33, date),
+            CurrencyRateEntity("EUR", "YER", 271.0, date),
+            CurrencyRateEntity("EUR", "ZMW", 29.50, date),
+            CurrencyRateEntity("EUR", "ZWL", 28.0, date)
         )
         currencyDao.insertRates(rates)
     }
@@ -390,6 +560,92 @@ class CurrencyRepository(
             "UAH" -> "Ukraine"
             "JOD" -> "Jordan"
             "IQD" -> "Iraq"
+            "AFN" -> "Afghanistan"
+            "ALL" -> "Albania"
+            "AMD" -> "Armenia"
+            "AOA" -> "Angola"
+            "AZN" -> "Azerbaijan"
+            "BAM" -> "Bosnia & Herzegovina"
+            "BBD" -> "Barbados"
+            "BIF" -> "Burundi"
+            "BND" -> "Brunei"
+            "BOB" -> "Bolivia"
+            "BSD" -> "Bahamas"
+            "BTN" -> "Bhutan"
+            "BWP" -> "Botswana"
+            "BYN" -> "Belarus"
+            "BZD" -> "Belize"
+            "CDF" -> "DR Congo"
+            "CRC" -> "Costa Rica"
+            "CUP" -> "Cuba"
+            "CVE" -> "Cape Verde"
+            "DJF" -> "Djibouti"
+            "DOP" -> "Dominican Republic"
+            "ERN" -> "Eritrea"
+            "ETB" -> "Ethiopia"
+            "FJD" -> "Fiji"
+            "GEL" -> "Georgia"
+            "GMD" -> "Gambia"
+            "GNF" -> "Guinea"
+            "GTQ" -> "Guatemala"
+            "GYD" -> "Guyana"
+            "HNL" -> "Honduras"
+            "HTG" -> "Haiti"
+            "JMD" -> "Jamaica"
+            "KGS" -> "Kyrgyzstan"
+            "KHR" -> "Cambodia"
+            "KMF" -> "Comoros"
+            "KZT" -> "Kazakhstan"
+            "LAK" -> "Laos"
+            "LBP" -> "Lebanon"
+            "LRD" -> "Liberia"
+            "LSL" -> "Lesotho"
+            "LYD" -> "Libya"
+            "MDL" -> "Moldova"
+            "MGA" -> "Madagascar"
+            "MKD" -> "North Macedonia"
+            "MMK" -> "Myanmar"
+            "MNT" -> "Mongolia"
+            "MOP" -> "Macau"
+            "MRU" -> "Mauritania"
+            "MUR" -> "Mauritius"
+            "MVR" -> "Maldives"
+            "MWK" -> "Malawi"
+            "MZN" -> "Mozambique"
+            "NAD" -> "Namibia"
+            "NIO" -> "Nicaragua"
+            "PAB" -> "Panama"
+            "PGK" -> "Papua New Guinea"
+            "PYG" -> "Paraguay"
+            "RSD" -> "Serbia"
+            "RWF" -> "Rwanda"
+            "SCR" -> "Seychelles"
+            "SDG" -> "Sudan"
+            "SLE" -> "Sierra Leone"
+            "SOS" -> "Somalia"
+            "SRD" -> "Suriname"
+            "SSP" -> "South Sudan"
+            "STN" -> "São Tomé & Príncipe"
+            "SYP" -> "Syria"
+            "SZL" -> "Eswatini"
+            "TJS" -> "Tajikistan"
+            "TMT" -> "Turkmenistan"
+            "TND" -> "Tunisia"
+            "TOP" -> "Tonga"
+            "TTD" -> "Trinidad & Tobago"
+            "TZS" -> "Tanzania"
+            "UGX" -> "Uganda"
+            "UYU" -> "Uruguay"
+            "UZS" -> "Uzbekistan"
+            "VES" -> "Venezuela"
+            "VUV" -> "Vanuatu"
+            "WST" -> "Samoa"
+            "XAF" -> "Central Africa"
+            "XOF" -> "West Africa"
+            "XPF" -> "French Polynesia"
+            "YER" -> "Yemen"
+            "ZMW" -> "Zambia"
+            "ZWL" -> "Zimbabwe"
             else -> code
         }
     }
@@ -397,7 +653,7 @@ class CurrencyRepository(
     private fun formatCurrencyAmount(amount: Double, currencyCode: String): String {
         val symbols = DecimalFormatSymbols(Locale.US)
         val pattern = when (currencyCode.uppercase()) {
-            "JPY", "KRW", "IDR", "VND", "HUF", "CLP", "PYG", "IQD" -> "#,##0"
+            "JPY", "KRW", "IDR", "VND", "HUF", "CLP", "PYG", "IQD", "BIF", "CDF", "GNF", "LAK", "LBP", "MGA", "MMK", "RWF", "UGX", "VUV", "UZS" -> "#,##0"
             else -> "#,##0.00"
         }
         val df = DecimalFormat(pattern, symbols)
